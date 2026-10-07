@@ -70,6 +70,37 @@ const result = (hash, seeds = 23) => ({ info_hash: hash, max_seeders: seeds, max
         assert.equal(await progressPage.locator('[data-magnet-probe-ui="badge"]').innerText(), '● 23');
         await progressPage.close();
 
+        const dhtPage = await browser.newPage();
+        await dhtPage.setContent(`<a href="${magnet(HASH)}">DHT 测试</a>`);
+        await dhtPage.evaluate(() => { window.requests = []; window.GM_xmlhttpRequest = request => window.requests.push(request); });
+        await dhtPage.addScriptTag({ content: script });
+        await dhtPage.waitForFunction(() => window.requests.length === 1);
+        assert.ok((await dhtPage.evaluate(() => window.requests[0].url)).includes('magnet-scount.local'));
+        assert.equal(await dhtPage.evaluate(() => JSON.parse(window.requests[0].data).enable_dht), true);
+        await dhtPage.evaluate(() => window.requests[0].onerror());
+        await dhtPage.waitForFunction(() => window.requests.length === 2);
+        assert.ok((await dhtPage.evaluate(() => window.requests[1].url)).includes('127.0.0.1'));
+        await dhtPage.evaluate(data => window.requests[1].onload({ status: 200, responseText: JSON.stringify({
+            job_id: 'c'.repeat(32), done: false, results: [{...data, done: false, max_seeders: 0, max_leechers: 0,
+                dht: {status: 'checking', done: false, queries_sent: 8, queries_completed: 4, nodes_responded: 3,
+                    peer_count: 2, seeders_estimate: null, error: ''}}],
+        }) }), result(HASH));
+        const dhtSummary = dhtPage.locator('[data-magnet-probe-ui="panel"]').locator('#summary');
+        assert.match(await dhtSummary.innerText(), /Tracker 2\/2 · DHT 0\/1/);
+        assert.equal(await dhtPage.locator('[data-magnet-probe-ui="badge"]').innerText(), '… DHT');
+        await dhtPage.waitForFunction(() => window.requests.length === 3);
+        assert.ok((await dhtPage.evaluate(() => window.requests[2].url)).includes('127.0.0.1'));
+        await dhtPage.evaluate(data => window.requests[2].onload({ status: 200, responseText: JSON.stringify({
+            job_id: 'c'.repeat(32), done: true, results: [{...data, max_seeders: 0, max_leechers: 0,
+                dht: {status: 'ok', done: true, queries_sent: 8, queries_completed: 8, nodes_responded: 6,
+                    peer_count: 2, seeders_estimate: 4, error: ''}}],
+        }) }), result(HASH));
+        assert.match(await dhtSummary.innerText(), /DHT 1\/1 · 优质 0/);
+        assert.equal(await dhtPage.locator('[data-magnet-probe-ui="badge"]').innerText(), '◇ D2');
+        await dhtSummary.click();
+        assert.match(await dhtPage.locator('[data-magnet-probe-ui="panel"]').locator('#details').innerText(), /Seed ≈ 4/);
+        await dhtPage.close();
+
         const batchPage = await browser.newPage();
         await batchPage.setContent('<h2>Magnet 检测 · 示例页面</h2>');
         await batchPage.evaluate(magnet => {
@@ -97,6 +128,6 @@ const result = (hash, seeds = 23) => ({ info_hash: hash, max_seeders: seeds, max
         assert.deepEqual(errors, []);
         await batchPage.close();
         await page.close();
-        console.log('PASS: real-browser layout, legacy cleanup, deduplication, summary, href changes, batching, incremental tracker progress, retry and API errors');
+        console.log('PASS: real-browser layout, legacy cleanup, deduplication, summary, href changes, batching, incremental tracker/DHT progress, domain fallback, retry and API errors');
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

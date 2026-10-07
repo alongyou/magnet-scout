@@ -1,6 +1,6 @@
 {
   "name": "magnet-scout",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "private": true,
   "description": "Browser regression tests for the Magnet Scout userscript",
   "license": "MIT",

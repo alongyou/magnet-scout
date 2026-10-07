@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Magnet Scout
 // @namespace    https://github.com/alongyou/magnet-scout
-// @version      4.1.1
+// @version      4.2.0
 // @description  Inspect magnet links, view tracker progress, and summarize resource availability.
 // @author       alongyou
 // @license      MIT
@@ -12,6 +12,7 @@
 // @match        *://*/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
+// @connect      magnet-scount.local
 // @connect      127.0.0.1
 // @connect      localhost
 // ==/UserScript==

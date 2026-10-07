@@ -1,0 +1,6 @@
+# Mainline DHT entry points. One host:port per line.
+# Source: https://libtorrent.org/reference-Settings.html#dht_bootstrap_nodes
+# These are discovery entry points, not BitTorrent trackers.
+dht.libtorrent.org:25401
+dht.transmissionbt.com:6881
+router.bt.ouinet.work:6881

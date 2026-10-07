@@ -30,7 +30,7 @@ from typing import Any
 
 
 UDP_PROTOCOL_ID = 0x41727101980
-USER_AGENT = "MagnetScout/4.1.1"
+USER_AGENT = "MagnetScout/4.2.0"
 
 
 class BencodeError(ValueError):
@@ -40,8 +40,10 @@ class BencodeError(ValueError):
 def bdecode(data: bytes) -> Any:
     i = 0
 
-    def parse():
+    def parse(depth=0):
         nonlocal i
+        if depth > 32:
+            raise BencodeError("bencode nesting too deep")
         if i >= len(data):
             raise BencodeError("unexpected end of data")
 
@@ -58,7 +60,7 @@ def bdecode(data: bytes) -> Any:
             i += 1
             out = []
             while data[i:i+1] != b"e":
-                out.append(parse())
+                out.append(parse(depth + 1))
             i += 1
             return out
 
@@ -66,8 +68,10 @@ def bdecode(data: bytes) -> Any:
             i += 1
             out = {}
             while data[i:i+1] != b"e":
-                k = parse()
-                v = parse()
+                k = parse(depth + 1)
+                if not isinstance(k, bytes):
+                    raise BencodeError("dictionary key is not bytes")
+                v = parse(depth + 1)
                 out[k] = v
             i += 1
             return out
@@ -75,6 +79,8 @@ def bdecode(data: bytes) -> Any:
         if c.isdigit():
             colon = data.index(b":", i)
             length = int(data[i:colon])
+            if length < 0 or colon + 1 + length > len(data):
+                raise BencodeError("invalid byte string length")
             i = colon + 1
             out = data[i:i+length]
             i += length
@@ -83,6 +89,8 @@ def bdecode(data: bytes) -> Any:
         raise BencodeError(f"invalid bencode at offset {i}")
 
     result = parse()
+    if i != len(data):
+        raise BencodeError("trailing bencode data")
     return result
 
 

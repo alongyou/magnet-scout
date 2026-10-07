@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Magnet Scout
 // @namespace    https://github.com/alongyou/magnet-scout
-// @version      4.1.1
+// @version      4.2.0
 // @description  Inspect magnet links, view tracker progress, and summarize resource availability.
 // @author       alongyou
 // @license      MIT
@@ -12,6 +12,7 @@
 // @match        *://*/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
+// @connect      magnet-scount.local
 // @connect      127.0.0.1
 // @connect      localhost
 // ==/UserScript==
@@ -21,15 +22,17 @@
     if (window.__magnetQualityProbeV4) return;
     window.__magnetQualityProbeV4 = true;
 
-    const API_URL = 'http://127.0.0.1:8765/api/magnets/jobs';
+    const API_URL = 'http://magnet-scount.local:8765/api/magnets/jobs';
+    const FALLBACK_API_URL = 'http://127.0.0.1:8765/api/magnets/jobs';
     const BATCH_SIZE = 8;
+    const ENABLE_DHT = true;
     const GOOD_SEEDS = 20;
     const records = new Map();
     const links = new Map();
     let scanTimer, postTimer, busy = false, expanded = false;
     let panel, summaryButton, details;
     const colors = { queued: '#64748b', checking: '#2563eb', good: '#15803d',
-        seeded: '#15803d', peers: '#a16207', empty: '#64748b', unknown: '#64748b', error: '#b91c1c' };
+        seeded: '#15803d', dhtpeers: '#0369a1', peers: '#a16207', empty: '#64748b', unknown: '#64748b', error: '#b91c1c' };
 
     function cleanText(value) {
         return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -104,7 +107,9 @@
         const completed = live.filter(r => !['queued', 'checking'].includes(r.state)).length;
         const trackerDone = live.reduce((sum, record) => sum + (record.trackerDone || 0), 0);
         const trackerTotal = live.reduce((sum, record) => sum + (record.trackerTotal || 0), 0);
-        const label = `Magnet ${completed}/${live.length} · Tracker ${trackerDone}/${trackerTotal} · 优质 ${counts.good || 0} ${expanded ? '▾' : '▸'}`;
+        const dhtRecords = live.filter(record => record.dht && record.dht.status !== 'disabled');
+        const dhtDone = dhtRecords.filter(record => record.dht.done).length;
+        const label = `Magnet ${completed}/${live.length} · Tracker ${trackerDone}/${trackerTotal}${dhtRecords.length ? ` · DHT ${dhtDone}/${dhtRecords.length}` : ''} · 优质 ${counts.good || 0} ${expanded ? '▾' : '▸'}`;
         if (summaryButton.textContent !== label) summaryButton.textContent = label;
         summaryButton.setAttribute('aria-expanded', String(expanded));
         details.hidden = !expanded;
@@ -115,7 +120,7 @@
         retry.addEventListener('click', () => {
             for (const record of visibleRecords()) {
                 if (record.state !== 'checking') {
-                    record.trackerDone = 0; record.trackerTotal = 0;
+                    record.trackerDone = 0; record.trackerTotal = 0; record.dht = null;
                     setStatus(record, 'queued', '等待检测', '…');
                 }
             }
@@ -127,12 +132,12 @@
         const stats = document.createElement('div'); stats.className = 'stats';
         for (const [name, count] of [['优质', counts.good || 0], ['有种子', (counts.good || 0) + (counts.seeded || 0)],
             ['仅下载者', counts.peers || 0], ['未发现', counts.empty || 0],
-            ['无响应', counts.unknown || 0], ['错误', counts.error || 0]]) {
+            ['DHT发现Peer的资源', live.filter(r => r.dht?.peer_count > 0).length], ['无响应', counts.unknown || 0], ['错误', counts.error || 0]]) {
             const span = document.createElement('span'); span.textContent = `${name} ${count}`; stats.appendChild(span);
         }
         details.appendChild(stats);
         const note = document.createElement('div'); note.className = 'note';
-        note.textContent = `按唯一 BTIH 统计。优质：Tracker 报告 Seed ≥ ${GOOD_SEEDS}；人数取各 Tracker 最大值，不累加。Tracker 进度按已启动的资源×Tracker 次数计数，待检 ${counts.queued || 0} 个。`;
+        note.textContent = `按唯一 BTIH 统计。优质：Tracker 报告 Seed ≥ ${GOOD_SEEDS}；人数取各 Tracker 最大值，不累加。DHT Peer 按资源内 IP+端口去重，Seed 估算单独显示。Tracker 进度按已启动的资源×Tracker 次数计数，待检 ${counts.queued || 0} 个。`;
         details.appendChild(note);
         for (const record of live) {
             const row = document.createElement('div'); row.className = 'row';
@@ -206,15 +211,28 @@
         if (typeof result.done !== 'boolean' || result.trackers_completed > result.trackers_tested) {
             setStatus(record, 'error', 'API 返回格式错误', '!'); return false;
         }
+        const dht = result.dht;
+        if (dht && (typeof dht.done !== 'boolean' ||
+            ['peer_count', 'queries_completed', 'queries_sent', 'nodes_responded'].some(key => !Number.isInteger(dht[key]) || dht[key] < 0) ||
+            (dht.seeders_estimate !== null && (!Number.isInteger(dht.seeders_estimate) || dht.seeders_estimate < 0)))) {
+            setStatus(record, 'error', 'API 返回无效 DHT 数据', '!'); return false;
+        }
+        record.dht = dht || null;
         record.trackerDone = result.trackers_completed;
         record.trackerTotal = result.trackers_tested;
         const seeds = result.max_seeders, peers = result.max_leechers;
-        const description = `Seed ≥ ${seeds} | Leecher ≥ ${peers} | 活跃 Tracker ${result.active_trackers}/${result.trackers_tested} | 响应 ${result.trackers_responded}`;
+        let description = `Seed ≥ ${seeds} | Leecher ≥ ${peers} | 活跃 Tracker ${result.active_trackers}/${result.trackers_tested} | 响应 ${result.trackers_responded}`;
+        if (dht && dht.status !== 'disabled') {
+            const state = { queued: '等待', checking: '检测中', ok: '完成', no_response: '无响应', error: '错误' }[dht.status] || dht.status;
+            description += ` | DHT ${dht.peer_count} Peer · Seed ${dht.seeders_estimate === null ? '未知' : `≈ ${dht.seeders_estimate}`} · 查询 ${dht.queries_completed}/${dht.queries_sent} · 响应 ${dht.nodes_responded} · ${state}`;
+            if (dht.error) description += ` (${dht.error})`;
+        }
         if (!result.done) {
             setStatus(record, 'checking', `检测中 ${result.trackers_completed}/${result.trackers_tested} | 暂报 ${description}`,
-                `… ${result.trackers_completed}/${result.trackers_tested}${seeds ? ` · S${seeds}` : ''}`);
+                `… ${result.trackers_completed === result.trackers_tested && dht && !dht.done ? 'DHT' : `${result.trackers_completed}/${result.trackers_tested}`}${seeds ? ` · S${seeds}` : ''}`);
         } else if (seeds) setStatus(record, seeds >= GOOD_SEEDS ? 'good' : 'seeded', description, `● ${seeds}`);
         else if (peers) setStatus(record, 'peers', description, `◐ ${peers}`);
+        else if (dht?.peer_count > 0 || dht?.seeders_estimate > 0) setStatus(record, 'dhtpeers', description, dht.peer_count ? `◇ D${dht.peer_count}` : `≈ S${dht.seeders_estimate}`);
         else if (result.trackers_responded) setStatus(record, 'empty', `当前未发现 Seed/Peer | ${description}`, '○ 0');
         else setStatus(record, 'unknown', `Tracker 无有效响应 (${result.trackers_tested})，资源可用性未知`, '?');
         return true;
@@ -227,7 +245,7 @@
         busy = true;
         for (const record of batch) setStatus(record, 'checking', '正在检测 Tracker…', '…');
         updateSummary();
-        let finished = false, jobId;
+        let finished = false, jobId, apiBase = API_URL;
         const started = Date.now();
         function fail(error) {
             if (finished) return;
@@ -264,18 +282,23 @@
             } else if (Date.now() - started > 300000) fail('检测超过 5 分钟，请重试');
             else setTimeout(() => request(false), 500);
         }
+        function connectionError(creating, message) {
+            if (creating && apiBase !== FALLBACK_API_URL) {
+                apiBase = FALLBACK_API_URL; request(true);
+            } else fail(message);
+        }
         function request(creating) {
             try {
                 GM_xmlhttpRequest({
-                    method: creating ? 'POST' : 'GET', url: creating ? API_URL : `${API_URL}/${jobId}`,
+                    method: creating ? 'POST' : 'GET', url: creating ? apiBase : `${apiBase}/${jobId}`,
                     headers: creating ? { 'Content-Type': 'application/json' } : {},
                     data: creating ? JSON.stringify({ schema: 'magnet-probe/v3', page_title: document.title,
-                        source_url: location.href, items: batch.map(({ info_hash, magnet, title, trackers, source_url }) =>
+                        source_url: location.href, enable_dht: ENABLE_DHT, items: batch.map(({ info_hash, magnet, title, trackers, source_url }) =>
                             ({ info_hash, magnet, title, trackers, source_url })) }) : undefined,
                     timeout: 10000,
                     onload: response => apply(response, creating),
-                    onerror: () => fail('无法连接 Python API，请检查服务和油猴权限'),
-                    ontimeout: () => fail('读取检测进度超时，请重试'),
+                    onerror: () => connectionError(creating, '无法连接 Python API，请检查服务、hosts 和油猴权限'),
+                    ontimeout: () => connectionError(creating, '读取检测进度超时，请重试'),
                     onabort: () => fail('检测请求已取消'),
                 });
             } catch (error) { fail(`请求失败：${error.message}`); }

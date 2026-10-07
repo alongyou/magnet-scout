@@ -1,0 +1,12 @@
+services:
+  magnet-scout:
+    build: .
+    image: magnet-scout:local
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - scout-data:/data
+    restart: unless-stopped
+
+volumes:
+  scout-data:

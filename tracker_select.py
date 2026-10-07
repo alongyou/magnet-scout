@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 
 from tracker_probe import bdecode, info_hash_bytes, probe_tracker, unique_keep_order
+from paths import DATA_DIR
 
 ROOT = Path(__file__).resolve().parent
 REPO = "ngosang/trackerslist"
@@ -24,7 +25,7 @@ PUBLIC_RELEASES = ("https://releases.ubuntu.com/24.04/", "https://releases.ubunt
 
 
 def download(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "MagnetScout/4.1.1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "MagnetScout/4.2.0"})
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read(8 * 1024 * 1024 + 1)
     if len(data) > 8 * 1024 * 1024:
@@ -187,10 +188,10 @@ def save_selection(output: Path, qualified: list[dict], stamp: str):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--magnets", type=Path, default=ROOT / "magnets.txt")
-    parser.add_argument("--output", type=Path, default=ROOT / "trackers.txt")
-    parser.add_argument("--cache", type=Path, default=ROOT / "tracker_cache")
-    parser.add_argument("--report", type=Path, default=ROOT / "tracker_report.json")
+    parser.add_argument("--magnets", type=Path, default=DATA_DIR / "magnets.txt")
+    parser.add_argument("--output", type=Path, default=DATA_DIR / "trackers.txt")
+    parser.add_argument("--cache", type=Path, default=DATA_DIR / "tracker_cache")
+    parser.add_argument("--report", type=Path, default=DATA_DIR / "tracker_report.json")
     parser.add_argument("--refresh-magnets", action="store_true", help="refresh samples from official Ubuntu torrents first")
     parser.add_argument("--refresh-magnets-only", action="store_true")
     parser.add_argument("--input", type=Path, help="use a local all-list instead of downloading the repository")

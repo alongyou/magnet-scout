@@ -1,12 +1,12 @@
 # Magnet Scout
 
-在下载之前，查看 Magnet 链接的 Tracker 报告、种子人数和检测进度。
+在下载之前，查看 Magnet 链接的 Tracker 报告、DHT Peer、种子人数和检测进度。
 
-Magnet Scout 由本地 Python API、油猴脚本和 Tracker 筛选工具组成：脚本识别网页中的磁力链接，在链接旁显示紧凑标签，并用一个可收起的面板汇总本页资源。Python 查询 UDP、HTTP、HTTPS Tracker 的 scrape 接口，返回人数和逐次检测进度。
+Magnet Scout 由本地 Python API、油猴脚本和 Tracker 筛选工具组成：脚本识别网页中的磁力链接，在链接旁显示紧凑标签，并用一个可收起的面板汇总本页资源。Python 并行查询 UDP、HTTP、HTTPS Tracker 的 scrape 接口和 Mainline DHT，返回人数、去重 Peer 数和逐次检测进度。支持源码运行或 Docker 部署。
 
 [安装油猴脚本](https://raw.githubusercontent.com/alongyou/magnet-scout/main/magnet-scout.user.js) · [提交问题](https://github.com/alongyou/magnet-scout/issues)
 
-**本项目查询 Tracker 数据，不下载资源内容。Tracker 无响应不等于资源失效，有种子也不保证可以完成下载。**
+**本项目查询 Tracker 和 DHT 数据，不下载资源内容。无响应不等于资源失效，有种子也不保证可以完成下载。**
 
 ![链接旁的短标签与资源汇总面板](docs/images/ui-preview.png)
 
@@ -18,7 +18,9 @@ Magnet Scout 由本地 Python API、油猴脚本和 Tracker 筛选工具组成�
 - 短标签显示 Seed 或 Leecher 人数，不额外插入状态行或换行。
 - 悬停查看详情，点击标签打开汇总面板。
 - 按唯一 BTIH 汇总资源，支持十六进制和 Base32 hash；重复链接只统计一次。
-- 同时显示资源完成数、Tracker 查询完成数和当前暂报人数。
+- 同时显示资源完成数、Tracker 查询完成数、DHT 完成数和当前暂报人数。
+- DHT 逐节点更新进度，按 IP + 端口去重 Peer，支持 BEP 33 Seed 估算。
+- Docker 非 root 运行、健康检查与持久化数据卷。
 - 自动下载公开 Tracker 列表，用多个测试资源重复检测、筛选并排序。
 - 保存每次筛选的详细报告，更新 Tracker 列表前备份旧文件。
 - 保留同步接口，提供后台检测任务及进度查询接口。
@@ -30,9 +32,63 @@ Magnet Scout 由本地 Python API、油猴脚本和 Tracker 筛选工具组成�
 - 筛选及实际检测需要访问 GitHub、Ubuntu 官方下载站和公开 Tracker；支持 UDP 的网络可以检测 UDP Tracker。
 - Node.js、Playwright 和 Chromium 仅用于可选的浏览器回归测试。
 
-Python 和浏览器应运行在同一台机器上。脚本默认连接 `http://127.0.0.1:8765`。
+默认部署在浏览器所在的机器。脚本优先连接 `http://magnet-scount.local:8765`；连接失败或超时时自动尝试 `http://127.0.0.1:8765`。域名按当前配置保留 `scount` 拼写。
 
-## 快速开始
+## Docker 启动（推荐）
+
+安装 Docker Engine + Compose，或 Docker Desktop，然后在仓库目录运行：
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
+
+如果已有 Python API 占用 8765 端口，先停止该服务。容器内部监听 `0.0.0.0`，Compose 将宿主机端口绑定到 `127.0.0.1`，供本机浏览器访问。
+
+在**浏览器所在机器**的 hosts 文件中添加：
+
+```text
+127.0.0.1 magnet-scount.local
+```
+
+macOS / Linux 的文件是 `/etc/hosts`，Windows 是 `C:\Windows\System32\drivers\etc\hosts`，编辑需要管理员权限。hosts 只负责解析域名，8765 端口仍由 Docker 映射。[`.local` 通常用于 mDNS](https://www.rfc-editor.org/rfc/rfc6762.html)，若浏览器或系统仍有解析问题，可以直接使用脚本自带的 127.0.0.1 回退地址。无需购买域名或配置公网 DNS。
+
+首次启动将公开测试资源和 DHT 启动节点复制到 `/data`，并尝试下载 `trackers_all.txt` 作为初始候选。**初始列表尚未经过优质筛选**；下载失败时 API 仍能使用 Magnet 自带 Tracker 和 DHT。筛选当前网络中的优质 Tracker：
+
+```bash
+docker compose run --rm magnet-scout python tracker_select.py --refresh-magnets
+```
+
+`scout-data` 命名卷保存 `trackers.txt`、`magnets.txt`、报告、缓存、备份、`dht_bootstrap.txt` 和 `dht_nodes.json`。重建容器不覆盖已有配置；`docker compose down` 保留卷，`down -v` 会删除数据。使用目录挂载时需要让容器 UID/GID `10001:10001` 有写权限。可设置 `MAGNET_SCOUT_INIT_TRACKERS=false` 禁用首次下载。
+
+更新源码及容器：
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### 自行发布 Docker Hub
+
+仓库的 GitHub Actions 只测试、构建和启动验证镜像，**不发布镜像**。下面的账号为占位符，发布由维护者自行执行：
+
+```bash
+docker build -t YOUR_DOCKERHUB_ACCOUNT/magnet-scout:4.2.0 .
+docker login
+docker push YOUR_DOCKERHUB_ACCOUNT/magnet-scout:4.2.0
+```
+
+发布后，在同类架构的机器上运行：
+
+```bash
+docker run -d --name magnet-scout --restart unless-stopped \
+  -p 127.0.0.1:8765:8765 -v scout-data:/data \
+  YOUR_DOCKERHUB_ACCOUNT/magnet-scout:4.2.0
+```
+
+普通 `docker build` 生成当前构建平台的镜像。要同时支持 Intel/AMD 与 Apple Silicon，可自行使用 [Docker Buildx 多平台构建](https://docs.docker.com/build/building/multi-platform/) 发布 `linux/amd64,linux/arm64` 镜像。
+
+## 源码快速开始
 
 ### 1. 安装依赖
 
@@ -90,7 +146,7 @@ python -m uvicorn magnet_api:app --host 127.0.0.1 --port 8765
 
 1. 在浏览器安装 Tampermonkey 等脚本管理器。
 2. 打开 [Magnet Scout 安装链接](https://raw.githubusercontent.com/alongyou/magnet-scout/main/magnet-scout.user.js)，在脚本管理器中确认安装。
-3. 允许脚本管理器访问 `127.0.0.1`，打开含有 Magnet 链接的网页并刷新。
+3. 允许脚本管理器访问 `magnet-scount.local` 和 `127.0.0.1`，打开含有 Magnet 链接的网页并刷新。
 
 也可在脚本管理器中新建脚本，粘贴 [magnet-scout.user.js](magnet-scout.user.js) 的全部内容并保存。
 
@@ -120,16 +176,19 @@ python -m uvicorn magnet_api:app --host 127.0.0.1 --port 8765
 | `● 23` | Tracker 报告 Seed ≥ 23 |
 | `◐ 8` | Seed 0，有 Leecher |
 | `○ 0` | 有有效响应，目前未发现 Seed/Leecher |
-| `?` | Tracker 无有效响应，资源可用性未知 |
+| `◇ D2` | DHT 找到 2 个去重 Peer，Tracker 未报告活跃人数 |
+| `≈ S4` | 仅 DHT Seed 估算为 4，尚未返回 Peer 地址 |
+| `… DHT` | Tracker 已完成，继续查询 DHT |
+| `?` | Tracker 和 DHT 未发现活跃信息，资源可用性未知 |
 | `… 12/30 · S23` | 完成 12 次查询，共 30 次；当前暂报 Seed ≥ 23 |
 | `…` | 等待检测或正在提交任务 |
 | `!` | API、进度读取或响应格式错误，悬停查看原因 |
 
-右下角面板显示资源完成数、Tracker 查询完成数和优质资源数量。展开后可查看每个资源的详情，点击资源行可滚动到对应链接。
+右下角面板显示资源完成数、Tracker 查询完成数、DHT 完成资源数和优质资源数量。DHT 详情显示查询次数、响应节点、去重 Peer 和 Seed 估算。展开后可查看每个资源的详情，点击资源行可滚动到对应链接。
 
 服务端每完成一次 Tracker 查询就更新进度，失败和超时也算完成。网页每 **0.5 秒**读取最新快照，因此多次快速完成的查询可能合并显示。进度按“资源 × Tracker”的查询次数统计，只包含已启动的资源；尚未启动的资源单独显示待检数量。
 
-每批最多提交 8 个资源，各批次串行检测；批次内部并发查询 Tracker。重新检测按钮在当前批次检测中暂时禁用。
+每批最多提交 8 个资源，各批次串行检测；批次内部并发查询 Tracker 和 DHT。两者都结束后资源才算完成。重新检测按钮在当前批次检测中暂时禁用。
 
 ### 人数和“优质”的含义
 
@@ -140,6 +199,33 @@ python -m uvicorn magnet_api:app --host 127.0.0.1 --port 8765
 - Tracker 服务器的“优质”按响应成功率和延迟筛选，与资源人数标准不同。
 
 协议参考：[UDP Tracker scrape（BEP 15）](https://www.bittorrent.org/beps/bep_0015.html#scrape)、[HTTP scrape（BEP 48）](https://www.bittorrent.org/beps/bep_0048.html)。
+
+## DHT 检测
+
+DHT 需要少量启动节点进入网络，之后通过节点返回的联系信息迭代查找，无需下载一个庞大的服务器列表。仓库的 `dht_bootstrap.txt` 使用 [libtorrent 文档列出的公开启动节点](https://libtorrent.org/reference-Settings.html#dht_bootstrap_nodes)：
+
+```text
+dht.libtorrent.org:25401
+dht.transmissionbt.com:6881
+router.bt.ouinet.work:6881
+```
+
+可编辑该文件，每行 `主机:端口`，IPv6 写成 `[地址]:端口`。程序缓存成功响应节点到 `dht_nodes.json`，启动时读取最近 24 小时的缓存，减少对启动服务器的依赖。需要允许出站 UDP；只读查询不需要额外发布 Docker UDP 端口。
+
+默认每个资源最多查询 64 个节点，并发 8 个，UDP 查询预算 12 秒，单次等待 1.5 秒。DNS 解析在预算前进行，可能使总耗时超过 12 秒。查询失败仍更新进度；Tracker 结果可以提前显示，DHT 出错也不会丢失已有结果。
+
+Peer 在每个资源内按规范化的 IP + 端口去重，涵盖 IPv4/IPv6。同一 IP 的不同端口保留为不同端点，数量不等于真实用户数。程序过滤网络返回的非公网端点；显式配置的启动主机允许本地 DNS 或代理解析。
+
+[DHT get_peers（BEP 5）](https://www.bittorrent.org/beps/bep_0005.html) 返回的 Peer 地址不能判断对方是否完整持有文件。支持 [BEP 33](https://www.bittorrent.org/beps/bep_0033.html) 的节点另外返回 Seed Bloom filter：程序合并过滤器后显示 `Seed ≈ N`，属于按 IP 估算的数量。未支持或过滤器饱和时显示未知，不能当成准确人数，也不会加入 Tracker 的 Seed 最大值或“优质资源”统计。
+
+独立检测公开测试 hash 或 Magnet：
+
+```bash
+python dht_probe.py 43519D14444904F6015E1A0D92018068FB0A49FA
+python dht_probe.py --help
+```
+
+Docker 中可运行 `docker compose run --rm magnet-scout python dht_probe.py <HASH>`。网页脚本默认启用 DHT，可修改 `ENABLE_DHT = false`；API 请求设置 `"enable_dht": false` 可只检测 Tracker。
 
 ## Tracker 自动筛选
 
@@ -207,6 +293,8 @@ python tracker_select.py --help
 
 API 优先使用筛选后的 Tracker，再补充 Magnet 自带 Tracker，每个资源最多检测 30 个。结果反映当前网络的一次重复测量，建议在网络环境改变后重新筛选。脚本不会自动安装定时任务。
 
+源码默认将运行数据保存在项目目录；可用环境变量 `MAGNET_SCOUT_DATA_DIR` 指定其他目录。Docker 默认设为 `/data`。
+
 ## 测试资源：magnets.txt
 
 将测试资源与服务器列表分开维护：`magnets.txt` 保存测试 hash 或链接，`trackers.txt` 保存筛选结果。
@@ -242,6 +330,7 @@ magnet:?xt=urn:btih:<40位十六进制或32位Base32的BTIH>&dn=Example
 ```json
 {
   "schema": "magnet-probe/v3",
+  "enable_dht": true,
   "items": [
     {
       "info_hash": "0123456789ABCDEF0123456789ABCDEF01234567",
@@ -253,11 +342,11 @@ magnet:?xt=urn:btih:<40位十六进制或32位Base32的BTIH>&dn=Example
 }
 ```
 
-任务响应包含 `done`、`trackers_completed`、`trackers_total` 和每个资源的 `results`。失败查询计入完成数，有效响应另计入 `trackers_responded`。任务数量有上限，创建新任务时会清理完成的旧任务；这不是持久化任务队列。
+任务响应包含 `done`、`trackers_completed`、`trackers_total`、`dht_completed`、`dht_total` 和每个资源的 `results`。资源的 `dht` 字段包含状态、查询进度、`peer_count`、可空的 `seeders_estimate`；默认启用 DHT。失败查询计入完成数，有效响应另计入 `trackers_responded`。任务数量有上限，创建新任务时会清理完成的旧任务；这不是持久化任务队列。
 
 ## 测试
 
-Python 回归测试无需访问外部 Tracker：
+Python 回归测试使用本机模拟 Tracker / DHT 节点，无需访问外部网络：
 
 ```bash
 python -m unittest -v
@@ -271,7 +360,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-测试覆盖紧凑布局、旧标签清理、重复链接、动态页面、分批查询、逐 Tracker 进度、重试和 API 错误。浏览器测试模拟 API 响应，不依赖外部 Tracker。
+测试覆盖紧凑布局、旧标签清理、重复链接、动态页面、分批查询、逐 Tracker / DHT 进度、域名失败回退、重试和 API 错误。浏览器测试模拟 API 响应，不依赖外部 Tracker。GitHub Actions 在 Linux 上执行回归测试，并构建 Docker 镜像验证健康检查、数据初始化和 API 请求。
 
 可以通过 `PROBE_TEST_BROWSER` 指定已有 Chromium 可执行文件。浏览器测试生成的 `ui-preview.png` 不纳入版本管理；README 中的界面图保存在 `docs/images/`。
 
@@ -287,9 +376,9 @@ npm run test:browser
 
 ## 数据与范围
 
-用户脚本向本地 API 发送识别出的 Magnet、hash、标题、Tracker 和来源页面 URL。Tracker 查询发送资源 hash；本项目没有云端服务。默认 API 只监听本机地址。
+用户脚本向本地 API 发送识别出的 Magnet、hash、标题、Tracker 和来源页面 URL。Tracker 查询发送资源 hash；本项目没有云端服务。源码运行和 Compose 的默认配置只向本机开放 API。
 
-本项目不获取资源 metadata 或文件列表，不验证 Peer 能否传输内容，也不实现 DHT/PEX。当前浏览器回归测试使用 Chromium；脚本在具体网站和脚本管理器中的行为可能受页面结构、浏览器设置影响。
+DHT 向公开节点发送资源 hash 并执行只读 `get_peers` 查询，不发送 `announce_peer`。本项目不获取资源 metadata 或文件列表，不验证 Peer 能否传输内容，也不实现 PEX 或常驻 DHT 路由服务。当前浏览器回归测试使用 Chromium；脚本在具体网站和脚本管理器中的行为可能受页面结构、浏览器设置影响。
 
 ## 贡献
 

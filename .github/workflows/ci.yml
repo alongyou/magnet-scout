@@ -1,0 +1,58 @@
+name: Test and build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest -v
+      - run: python scripts/build_userscript.py --check
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+
+  container:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: magnet-scout:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Validate Compose and smoke-test the image
+        run: |
+          docker compose config --quiet
+          docker run -d --name scout-test -e MAGNET_SCOUT_INIT_TRACKERS=false -p 127.0.0.1:18765:8765 magnet-scout:ci
+          curl --fail --retry 30 --retry-delay 1 --retry-all-errors --retry-max-time 45 http://127.0.0.1:18765/health
+          docker exec scout-test test -f /data/magnets.txt
+          docker exec scout-test test -f /data/dht_bootstrap.txt
+          curl --fail -H 'Content-Type: application/json' -d '{"items":[],"enable_dht":false}' http://127.0.0.1:18765/api/magnets/jobs
+      - name: Container logs
+        if: always()
+        run: docker logs scout-test || true
+      - name: Clean up
+        if: always()
+        run: docker rm -f scout-test || true

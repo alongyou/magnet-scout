@@ -10,6 +10,8 @@ dist/
 
 # Local tracker data, measurements and backups
 tracker_cache/
+dht_nodes.json
+data/
 tracker_report*.json
 trackers.txt
 trackers.txt.*.bak

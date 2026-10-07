@@ -17,6 +17,7 @@ class MagnetApiTests(unittest.TestCase):
     def batch(self):
         return magnet_api.MagnetBatch.model_validate({
             "schema": "magnet-probe/v3",
+            "enable_dht": False,
             "items": [{
                 "info_hash": HASH,
                 "magnet": f"magnet:?xt=urn:btih:{HASH}",
@@ -25,15 +26,18 @@ class MagnetApiTests(unittest.TestCase):
         })
 
     def test_tracker_file_is_independent_of_working_directory(self):
-        expected = magnet_api.load_global_trackers()
-        self.assertTrue(expected)
         original = Path.cwd()
         with tempfile.TemporaryDirectory() as directory:
-            try:
-                os.chdir(directory)
-                self.assertEqual(magnet_api.load_global_trackers(), expected)
-            finally:
-                os.chdir(original)
+            path = Path(directory) / "trackers.txt"
+            path.write_text("# test fixture\nudp://one:80\nudp://two:80\n")
+            with patch.object(magnet_api, "TRACKER_FILE", path):
+                expected = magnet_api.load_global_trackers()
+                self.assertEqual(len(expected), 2)
+                try:
+                    os.chdir(directory)
+                    self.assertEqual(magnet_api.load_global_trackers(), expected)
+                finally:
+                    os.chdir(original)
 
     def test_counts_use_maximum_and_deduplicate_trackers(self):
         def probe(tracker, ih, timeout):
@@ -125,6 +129,58 @@ class MagnetApiTests(unittest.TestCase):
             tasks, snapshot = magnet_api.prepare(batch)
         self.assertEqual(len(snapshot["results"]), 1)
         self.assertEqual(len(tasks), 3)
+
+    def test_tracker_finishes_before_dht_but_job_waits_for_both(self):
+        release = threading.Event()
+        batch = self.batch()
+        batch.enable_dht = True
+        def fake_dht(ih, publish):
+            if not release.wait(3):
+                raise AssertionError("DHT test never released")
+            result = {"status": "ok", "done": True, "queries_sent": 2, "queries_completed": 2,
+                      "nodes_responded": 2, "peer_count": 1, "seeders_estimate": None, "error": ""}
+            publish(result)
+            return result
+        with patch.object(magnet_api, "load_global_trackers", return_value=[]), \
+                patch.object(magnet_api, "probe_tracker", return_value={"status": "ok", "seeders": 3}), \
+                patch.object(magnet_api.dht_engine, "lookup", side_effect=fake_dht):
+            background = BackgroundTasks()
+            initial = magnet_api.create_job(batch, background)
+            task = background.tasks[0]
+            worker = threading.Thread(target=task.func, args=task.args, kwargs=task.kwargs)
+            worker.start()
+            try:
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    partial = magnet_api.job_status(initial["job_id"])
+                    if partial["trackers_completed"] == 2:
+                        break
+                    time.sleep(.01)
+                self.assertEqual(partial["trackers_completed"], 2)
+                self.assertEqual(partial["results"][0]["max_seeders"], 3)
+                self.assertFalse(partial["done"])
+                self.assertFalse(partial["results"][0]["done"])
+                self.assertEqual(partial["dht_total"], 1)
+            finally:
+                release.set()
+                worker.join(3)
+            final = magnet_api.job_status(initial["job_id"])
+            self.assertTrue(final["done"])
+            self.assertEqual(final["dht_completed"], 1, "final callback and future must not double-count")
+            self.assertEqual(final["results"][0]["dht"]["peer_count"], 1)
+            self.assertEqual(final["results"][0]["max_seeders"], 3)
+
+    def test_dht_failure_preserves_tracker_results(self):
+        batch = self.batch()
+        batch.enable_dht = True
+        with patch.object(magnet_api, "load_global_trackers", return_value=[]), \
+                patch.object(magnet_api, "probe_tracker", return_value={"status": "ok", "seeders": 4}), \
+                patch.object(magnet_api.dht_engine, "lookup", side_effect=OSError("UDP blocked")):
+            result = magnet_api.probe(batch)
+        self.assertTrue(result["done"])
+        self.assertEqual(result["dht_completed"], 1)
+        self.assertEqual(result["results"][0]["max_seeders"], 4)
+        self.assertEqual(result["results"][0]["dht"]["status"], "error")
 
     def test_invalid_hash_is_not_silently_skipped(self):
         batch = self.batch()
