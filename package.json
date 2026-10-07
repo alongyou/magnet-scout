@@ -1,0 +1,16 @@
+{
+  "name": "magnet-scout",
+  "version": "4.1.1",
+  "private": true,
+  "description": "Browser regression tests for the Magnet Scout userscript",
+  "license": "MIT",
+  "scripts": {
+    "test:browser": "node test_magnet_checker.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

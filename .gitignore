@@ -1,0 +1,31 @@
+# Python environment and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Local tracker data, measurements and backups
+tracker_cache/
+tracker_report*.json
+trackers.txt
+trackers.txt.*.bak
+*.bak
+
+# Browser tests
+node_modules/
+playwright-report/
+test-results/
+/ui-preview.png
+
+# Local configuration and editor state
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+*.log

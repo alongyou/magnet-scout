@@ -1,0 +1,17 @@
+# Public Ubuntu test resources; one magnet or BTIH per line.
+# Generated from official .torrent metadata; no ISO payload downloaded.
+# ubuntu-24.04.5.1-desktop-amd64.iso
+# Source: https://releases.ubuntu.com/24.04/ubuntu-24.04.5.1-desktop-amd64.iso.torrent
+magnet:?xt=urn%3Abtih%3A43519D14444904F6015E1A0D92018068FB0A49FA&dn=ubuntu-24.04.5.1-desktop-amd64.iso&tr=https%3A%2F%2Ftorrent.ubuntu.com%2Fannounce&tr=https%3A%2F%2Fipv6.torrent.ubuntu.com%2Fannounce
+
+# ubuntu-24.04.5-live-server-amd64.iso
+# Source: https://releases.ubuntu.com/24.04/ubuntu-24.04.5-live-server-amd64.iso.torrent
+magnet:?xt=urn%3Abtih%3AA3B4136A174E30B121A6BB6AB75B577EA7EDA5F3&dn=ubuntu-24.04.5-live-server-amd64.iso&tr=https%3A%2F%2Ftorrent.ubuntu.com%2Fannounce&tr=https%3A%2F%2Fipv6.torrent.ubuntu.com%2Fannounce
+
+# ubuntu-26.04.1-desktop-amd64.iso
+# Source: https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso.torrent
+magnet:?xt=urn%3Abtih%3A5B1E0D988FC7A0C9E99BD852071681A59974B39F&dn=ubuntu-26.04.1-desktop-amd64.iso&tr=https%3A%2F%2Ftorrent.ubuntu.com%2Fannounce&tr=https%3A%2F%2Fipv6.torrent.ubuntu.com%2Fannounce
+
+# ubuntu-26.04.1-live-server-amd64.iso
+# Source: https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso.torrent
+magnet:?xt=urn%3Abtih%3AE4F19CF636409B72571766C2AE89C98FC21A109D&dn=ubuntu-26.04.1-live-server-amd64.iso&tr=https%3A%2F%2Ftorrent.ubuntu.com%2Fannounce&tr=https%3A%2F%2Fipv6.torrent.ubuntu.com%2Fannounce
