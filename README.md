@@ -68,6 +68,35 @@ git pull
 docker compose up -d --build
 ```
 
+### NAS 内网部署（无需路由器 NAT）
+
+将项目放到 NAS 后，在项目目录的 `.env` 设置 NAS 的内网地址，例如：
+
+```text
+MAGNET_SCOUT_BIND_IP=172.16.54.6
+```
+
+使用独立的 NAS Compose 文件启动，固定项目名以复用同一数据卷：
+
+```bash
+docker compose -p magnet-scout -f compose.nas.yaml up -d --build
+docker compose -p magnet-scout -f compose.nas.yaml logs -f
+```
+
+此配置将 API 绑定在指定内网地址的 8765 端口。浏览器所在电脑的 hosts 添加：
+
+```text
+172.16.54.6 magnet-scount.local
+```
+
+然后访问 `http://magnet-scount.local:8765/health`，油猴脚本默认域名无需修改。若已有 `127.0.0.1 magnet-scount.local` 映射，请替换旧记录。NAS 防火墙需允许客户端访问 TCP 8765；API 没有登录鉴权，仅用于可信内网。无需路由器端口转发或 SSH 隧道，外网访问仍需 VPN 等连接。
+
+筛选 NAS 所在网络的优质 Tracker：
+
+```bash
+docker compose -p magnet-scout -f compose.nas.yaml run --rm magnet-scout python tracker_select.py --refresh-magnets
+```
+
 ### 自行发布 Docker Hub
 
 仓库的 GitHub Actions 只测试、构建和启动验证镜像，**不发布镜像**。下面的账号为占位符，发布由维护者自行执行：
